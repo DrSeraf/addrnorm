@@ -35,6 +35,19 @@ def _import_run_job():
 
 
 run_job = _import_run_job()
+def _import_loggingx():
+    try:
+        from .utils import loggingx as _lx  # type: ignore
+        return _lx
+    except Exception:
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        pkg_name = os.path.basename(base_dir)
+        parent = os.path.dirname(base_dir)
+        if parent not in sys.path:
+            sys.path.insert(0, parent)
+        return importlib.import_module(f"{pkg_name}.utils.loggingx")
+
+loggingx = _import_loggingx()
 
 
 def _split_profiles(s: str | None) -> List[str]:
@@ -62,6 +75,8 @@ with st.sidebar:
     libpostal_url = st.text_input("Libpostal URL (опц.)", value="http://localhost:8080/parser")
     validate = st.selectbox("Валидация", ["off", "loose", "strict"], index=1)
     fuzzy_threshold = st.slider("Порог fuzzy для починок", min_value=70, max_value=100, value=85, step=1)
+    estimate_total = st.checkbox("Оценивать прогресс (подсчитать строки заранее)", value=True,
+                                 help="Для очень больших файлов может занять немного времени перед стартом")
     st.divider()
     st.subheader("Сохранение результатов")
     save_dir = st.text_input("Директория сохранения", value=r"D:\Desktop")
@@ -110,6 +125,31 @@ if run_clicked and uploaded_csv is not None:
         report_path = os.path.join(final_dir, f"{out_stem}.report.json")
         samples_dir = final_dir
 
+        # Прогресс-бар
+        progress = st.progress(0.0, text="Подготовка…")
+
+        # Оценка общего количества строк (без заголовка)
+        total_est = 0
+        if estimate_total:
+            try:
+                with open(input_path, "rb") as fh:
+                    total_est = sum(1 for _ in fh) - 1
+                    if total_est < 0:
+                        total_est = 0
+            except Exception:
+                total_est = 0
+
+        # Перехват логирования прогресса из пайплайна
+        orig_log_progress = getattr(loggingx, "log_progress", None)
+
+        def _ui_log_progress(total_rows: int, processed: int, speed: float, eta_text: str, quiet: bool = False):
+            denom = total_est if total_est > 0 else max(processed, 1)
+            ratio = min(1.0, processed / denom)
+            progress.progress(ratio, text=f"Обработано {processed:,} из ~{(denom):,}  |  ≈{int(speed):,}/с")
+
+        if orig_log_progress is not None:
+            loggingx.log_progress = _ui_log_progress  # type: ignore
+
         # Запуск пайплайна
         t0 = time.time()
         run_job(
@@ -133,7 +173,12 @@ if run_clicked and uploaded_csv is not None:
             quiet=True,
             rules_path=rules_path,
         )
+        # Восстановим логгер прогресса
+        if orig_log_progress is not None:
+            loggingx.log_progress = orig_log_progress  # type: ignore
+
         dt = time.time() - t0
+        progress.progress(1.0, text=f"Готово за {dt:.1f} c")
 
         # Чтение артефактов
         st.success(f"Готово за {dt:.1f} c")
