@@ -1,0 +1,19 @@
+country_zip_regex:
+  THAILAND: '^(10|11|12|13|14|15|16|17|18|20|21|22|23|24|25|26|27|30|31|32|33|34|35|36|37|38|39|40|41|42|43|44|45|46|47|48|49|50|51|52|53|54|55|56|57|58|60|61|62|63|64|65|66|67|70|71|72|73|74|75|76|77)\d{3}$'
+  INDONESIA: '^\d{5}$'
+  MALAYSIA: '^\d{5}$'
+  AUSTRALIA: '^\d{4}$'
+  UNITED STATES: '^\d{5}(-\d{4})?$'
+  UNITED KINGDOM: '^(GIR ?0AA|[A-Z]{1,2}\d[A-Z\d]? ?\d[A-Z]{2})$'
+
+synonyms:
+  BKK: Bangkok
+  'CHON BURI': Chonburi
+  CHIANGMAI: 'Chiang Mai'
+  NONTHABURI: Nonthaburi
+  BANGKOG: Bangkok
+
+drop_unit_attrs: true                      # удалять Unit/Room/Floor/… из street
+drop_emails_phones_from_street: true       # убирать почты/телефоны/хэштеги из street
+fix_echo_locality_region: true             # гасить эхо: locality==region → очищаем region
+drop_non_addressy_single_tokens: true      # одиночный мусор типа "Sdfasdf" в street → пусто
