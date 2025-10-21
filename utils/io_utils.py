@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 from typing import Iterable, List, Dict
 import pandas as pd
+import re
 
 TARGET_COLS = ["street","district","locality","region","country","zip","address"]
 OUTPUT_COLS = ["street","district","locality","region","country","zip"]
@@ -14,30 +15,38 @@ def _normalize_header(raw: List[str]) -> List[str]:
 def _row_to_record(row: List[str], header: List[str]) -> Dict[str,str]:
     rec = {k: "" for k in TARGET_COLS}
     n = min(len(row), len(header))
-    # сначала забираем целевые поля по именам
+
+    CONTACT_COL_RE = re.compile(r"(email|e-mail|mail|phone|mobile|tel|fax|contact|whatsapp|line|wechat|skype)", re.I)
+    EMAIL_RE  = re.compile(r"[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}", re.I)
+    PHONE_RE  = re.compile(r"(?:\+?\d[\d \-()]{6,}\d)|(?:\b\d{8,}\b)")
+
+    # целевые колонки по именам
     for i in range(n):
-        col = header[i]
+        col = header[i].strip()
         val = row[i].strip()
         if col in TARGET_COLS:
             rec[col] = val
-    # теперь соберём «лишние» в address (даже если колонки address нет в исходнике)
+
+    # extras -> address, НО: пропускаем контактные колонки и значения с e-mail/телефонами
     extras: List[str] = []
     for i in range(n):
-        col = header[i]
-        if col not in {"street","district","locality","region","country","zip","address"}:
-            v = row[i].strip()
-            if v and v.lower() not in {"nan","null","none"}:
-                extras.append(v)
-    # если в исходнике есть address — добавим к нему хвост; если нет — просто создадим
+        col = header[i].strip()
+        if col in {"street","district","locality","region","country","zip","address"}:
+            continue
+        if CONTACT_COL_RE.search(col):
+            continue  # столбец явно контактный — игнор
+        v = row[i].strip()
+        if not v or v.lower() in {"nan","null","none"}:
+            continue
+        if EMAIL_RE.search(v) or PHONE_RE.search(v):
+            continue  # явный контакт в значении — игнор
+        extras.append(v)
+
     base = rec.get("address","").strip()
     tail = ", ".join(extras)
-    if base and tail:
-        rec["address"] = f"{base}, {tail}"
-    elif tail:
-        rec["address"] = tail
-    else:
-        rec["address"] = base
+    rec["address"] = f"{base}, {tail}".strip(", ") if tail else base
     return rec
+
 
 def read_csv_chunks(path: str, chunksize: int, encoding: str, sep: str) -> Iterable[pd.DataFrame]:
     """
