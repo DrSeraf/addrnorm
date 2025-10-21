@@ -23,7 +23,8 @@ _EDGE_RE  = re.compile(r"^[\s,;/\-_.]+|[\s,;/\-_.]+$")
 
 # ZIP: сначала пробуем чисто-цифровые 4–6, иначе берём последний похожий токен
 _ONLY_DIGITS_ZIP = re.compile(r"\b\d{4,6}\b")
-_GENERIC_ZIP_TOK = re.compile(r"[A-Z0-9][A-Z0-9\- ]{2,9}$", re.IGNORECASE)
+# Требуем хотя бы одну цифру в ZIP-токене, чтобы отсеять слова вроде "ADDRESS"
+_GENERIC_ZIP_TOK = re.compile(r"(?=.*\d)[A-Z0-9][A-Z0-9\- ]{2,9}$", re.IGNORECASE)
 
 def _is_empty(s: Optional[str]) -> bool:
     return not s or str(s).strip() == "" or str(s).strip().lower() in {"nan", "null", "none"}
@@ -142,9 +143,11 @@ def _normalize_zip(zip_code: Optional[str], alpha2: Optional[str], ctx) -> Optio
     if _is_empty(zip_code):
         return None
     z = str(zip_code).strip().upper()
-    # если в ZIP попали слова (BANGKOK 10220) — вытащим индекс
+    # если в ZIP попали слова (BANGKOK 10220) — вытащим индекс; если нет подходящего токена — обнулим
     m = _ONLY_DIGITS_ZIP.search(z) or _GENERIC_ZIP_TOK.search(z)
-    z = (m.group(0).strip() if m else z)
+    if not m:
+        return None
+    z = m.group(0).strip()
     # финальная чистка пробелов
     z = _WS_RE.sub(" ", z).strip()
     return z or None

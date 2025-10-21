@@ -24,6 +24,7 @@ import sys
 import argparse
 from dataclasses import dataclass
 from typing import Dict, Any, Optional, List, Pattern
+import unicodedata
 
 try:
     import yaml  # type: ignore
@@ -81,6 +82,33 @@ _STREET_UNIT_ATTRS = re.compile(
 
 # «шумовые» слова — оставляем цифры/дом/сой/роуд и т.п., выкидываем одиночные бессмысленные токены
 _NON_ADDRESSY = re.compile(r"^[A-Za-z]{2,}$")
+
+# --- БАЗОВАЯ ЧИСТКА ДЛЯ ПАЙПЛАЙНА ---
+_WS_RE = re.compile(r"\s+")
+_PUNCT_EDGE_RE = re.compile(r"^[\s,;/\-_.]+|[\s,;/\-_.]+$")
+
+def clean_value(value: str | None) -> str | None:
+    """
+    Базовая чистка строк для этапа CLEAN пайплайна:
+      - None/null/NaN → None
+      - Unicode NFKC нормализация
+      - trim + схлопывание пробелов
+      - удаление лишней пунктуации по краям
+    Совместимо с ожиданиями pipeline.py
+    """
+    if value is None:
+        return None
+    s = str(value).strip()
+    if not s or s.lower() in {"nan", "none", "null"}:
+        return None
+    try:
+        s = unicodedata.normalize("NFKC", s)
+    except Exception:
+        pass
+    s = _WS_RE.sub(" ", s)
+    s = _PUNCT_EDGE_RE.sub("", s)
+    s = s.strip()
+    return s or None
 
 
 def _safe_upper(s: Optional[str]) -> str:

@@ -53,6 +53,54 @@ def _load_profiles(profiles: list[str]) -> Dict[str, Any]:
                 merged[k] = v
     return merged
 
+def _load_user_rules(rules_path: str | None) -> Dict[str, Any]:
+    """
+    Загружаем rules.yaml и приводим к структуре профилей:
+      - country_zip_regex (по названию страны) -> zip_patterns[ALPHA2]
+      - synonyms -> locality_aliases (глобальные)
+    Остальные известные флаги прокидываем как есть.
+    """
+    if not rules_path:
+        return {}
+    if not os.path.exists(rules_path):
+        return {}
+    try:
+        with open(rules_path, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+    except Exception:
+        return {}
+
+    merged: Dict[str, Any] = {}
+
+    # ZIP паттерны: имя страны -> alpha2
+    zip_src = data.get("country_zip_regex") or {}
+    if isinstance(zip_src, dict) and zip_src:
+        zip_patterns: Dict[str, str] = {}
+        for country_name, pat in zip_src.items():
+            if not country_name or not pat:
+                continue
+            try:
+                c = pycountry.countries.lookup(str(country_name))
+                a2 = getattr(c, "alpha_2", None)
+                if a2:
+                    zip_patterns[a2] = str(pat)
+            except Exception:
+                continue
+        if zip_patterns:
+            merged["zip_patterns"] = zip_patterns
+
+    # Синонимы → алиасы городов (глобально)
+    syn = data.get("synonyms") or {}
+    if isinstance(syn, dict) and syn:
+        merged["locality_aliases"] = {str(k).strip().lower(): str(v) for k, v in syn.items() if k and v}
+
+    # Прочие флаги сохраняем на будущее
+    for k in ("drop_unit_attrs", "drop_emails_phones_from_street", "fix_echo_locality_region", "drop_non_addressy_single_tokens"):
+        if k in data:
+            merged[k] = data.get(k)
+
+    return merged
+
 def _compose_street(existing_street: str | None, parsed: dict) -> str:
     if existing_street:
         return existing_street
@@ -123,7 +171,19 @@ def _repair_misaligned_row(row: dict) -> dict:
 
 def run_job(**kwargs):
     ctx = Context(**kwargs)
-    ctx.profiles_data = _load_profiles(ctx.profiles)
+    # 1) профили
+    prof = _load_profiles(ctx.profiles)
+    # 2) rules.yaml (если передали путь)
+    user_rules = _load_user_rules(kwargs.get("rules_path") or kwargs.get("rules"))
+    # 3) мёрдж
+    for k, v in (user_rules or {}).items():
+        if isinstance(v, dict):
+            prof.setdefault(k, {}).update(v)
+        elif isinstance(v, list):
+            prof.setdefault(k, []).extend(v)
+        else:
+            prof[k] = v
+    ctx.profiles_data = prof
 
     input_path: str = kwargs["input_path"]
     ctx.input_path = input_path
