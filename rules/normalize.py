@@ -26,6 +26,13 @@ _ONLY_DIGITS_ZIP = re.compile(r"\b\d{4,6}\b")
 # Требуем хотя бы одну цифру в ZIP-токене, чтобы отсеять слова вроде "ADDRESS"
 _GENERIC_ZIP_TOK = re.compile(r"(?=.*\d)[A-Z0-9][A-Z0-9\- ]{2,9}$", re.IGNORECASE)
 
+# --- street cleaning helpers (optional via profiles flags) ---
+_EMAIL_RE = re.compile(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", re.I)
+_PHONE_RE = re.compile(r"\+?\d[\d \-()]{6,}\d")
+_TAG_RE   = re.compile(r"#\w+")
+_UNIT_RE  = re.compile(r"\b(?:unit|apt|apartment|room|rm|bldg|building|flr|floor|tower|blk|block|lvl|level|dept|suite|ste)\b\.?", re.I)
+_NON_ADDRESSY = re.compile(r"^[A-Za-z]{2,}$")
+
 def _is_empty(s: Optional[str]) -> bool:
     return not s or str(s).strip() == "" or str(s).strip().lower() in {"nan", "null", "none"}
 
@@ -122,6 +129,20 @@ def _normalize_street(street: Optional[str], ctx) -> Optional[str]:
     if _is_empty(street):
         return None
     s = str(street).strip()
+
+    # опциональная зачистка по флагам из профиля/правил (консервативно: по умолчанию выключено)
+    flags = ctx.profiles_data or {}
+    if flags.get("drop_emails_phones_from_street", False):
+        s = _EMAIL_RE.sub("", s)
+        s = _PHONE_RE.sub("", s)
+        s = _TAG_RE.sub("", s)
+    if flags.get("drop_unit_attrs", False):
+        s = _UNIT_RE.sub("", s)
+        s = re.sub(r"\b(?:FL|FLOOR|LVL|LEVEL|RM|ROOM|APT|SUITE|STE|UNIT|BLDG|BLK|BLOCK)\b\.?\s*\d+[A-Z\-\/]*", "", s, flags=re.I)
+    if flags.get("drop_non_addressy_single_tokens", False):
+        tokens = [t for t in re.split(r"[,\s]+", s) if t]
+        if len(tokens) == 1 and _NON_ADDRESSY.match(tokens[0]) and not re.search(r"\d", tokens[0]):
+            return None
     # нормализуем разделители
     s = _SEP_RE.sub(", ", s)
     s = _EDGE_RE.sub("", s)
@@ -173,6 +194,13 @@ def normalize_fields(row: dict, ctx) -> dict:
     district_norm = _normalize_district(district, alpha2, ctx)
     street_norm   = _normalize_street(street, ctx)
     zip_norm      = _normalize_zip(zip_code, alpha2, ctx)
+
+    # echo-fix: locality == region → очищаем region (по флагу; консервативно: по умолчанию выключено)
+    if (ctx.profiles_data or {}).get("fix_echo_locality_region", False):
+        lk = unidecode(locality_norm or "").strip().lower()
+        rk = unidecode(region_norm or "").strip().lower()
+        if lk and rk and lk == rk:
+            region_norm = None
 
     return {
         "street":   street_norm,

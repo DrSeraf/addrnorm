@@ -1,7 +1,7 @@
 # addrnorm/utils/io_utils.py
 from __future__ import annotations
 import csv
-from typing import Iterable, List, Dict
+from typing import Iterable, List, Dict, Optional
 import pandas as pd
 import re
 
@@ -13,19 +13,23 @@ def _normalize_header(raw: List[str]) -> List[str]:
     return [h.strip() for h in raw]
 
 def _row_to_record(row: List[str], header: List[str]) -> Dict[str,str]:
-    rec = {k: "" for k in TARGET_COLS}
+    """
+    Собираем запись:
+      - сохраняем ВСЕ исходные колонки как есть (не теряем данные)
+      - гарантируем наличие TARGET_COLS
+      - address дополняем "хвостом" из нецелевых колонок (кроме явных контактов)
+    """
+    rec: Dict[str, str] = {}
     n = min(len(row), len(header))
 
     CONTACT_COL_RE = re.compile(r"(email|e-mail|mail|phone|mobile|tel|fax|contact|whatsapp|line|wechat|skype)", re.I)
     EMAIL_RE  = re.compile(r"[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}", re.I)
     PHONE_RE  = re.compile(r"(?:\+?\d[\d \-()]{6,}\d)|(?:\b\d{8,}\b)")
 
-    # целевые колонки по именам
+    # 1) Сохраняем все входные столбцы как есть
     for i in range(n):
         col = header[i].strip()
-        val = row[i].strip()
-        if col in TARGET_COLS:
-            rec[col] = val
+        rec[col] = row[i].strip()
 
     # extras -> address, НО: пропускаем контактные колонки и значения с e-mail/телефонами
     extras: List[str] = []
@@ -45,6 +49,10 @@ def _row_to_record(row: List[str], header: List[str]) -> Dict[str,str]:
     base = rec.get("address","").strip()
     tail = ", ".join(extras)
     rec["address"] = f"{base}, {tail}".strip(", ") if tail else base
+
+    # 3) Гарантируем наличие целевых столбцов (если их не было в входном заголовке)
+    for c in TARGET_COLS:
+        rec.setdefault(c, "")
     return rec
 
 
@@ -71,19 +79,25 @@ def read_csv_chunks(path: str, chunksize: int, encoding: str, sep: str) -> Itera
             rec = _row_to_record(row, header)
             buf.append(rec)
             if len(buf) >= chunksize:
-                yield pd.DataFrame.from_records(buf, columns=TARGET_COLS)
+                # сохраняем все входные колонки + TARGET_COLS
+                cols = list(dict.fromkeys(header + TARGET_COLS))
+                yield pd.DataFrame.from_records(buf, columns=cols)
                 buf.clear()
         if buf:
-            yield pd.DataFrame.from_records(buf, columns=TARGET_COLS)
+            cols = list(dict.fromkeys(header + TARGET_COLS))
+            yield pd.DataFrame.from_records(buf, columns=cols)
 
 def filter_target_columns(df: pd.DataFrame) -> pd.DataFrame:
-    # Уже приходят только целевые + address в нужном порядке
+    """
+    Консервативно: не выкидываем лишние колонки, только гарантируем наличие TARGET_COLS.
+    Возвращаем DataFrame как есть (с сохранением всех входных столбцов).
+    """
     for c in TARGET_COLS:
         if c not in df.columns:
             df[c] = ""
-    return df[TARGET_COLS]
+    return df
 
-def write_chunk(df: pd.DataFrame, out_path: str, sep: str, quote_all: bool, header: bool):
+def write_chunk(df: pd.DataFrame, out_path: str, sep: str, quote_all: bool, header: bool, columns: Optional[List[str]] = None):
     quoting = csv.QUOTE_ALL if quote_all else csv.QUOTE_MINIMAL
     df.to_csv(
         out_path,
@@ -93,5 +107,5 @@ def write_chunk(df: pd.DataFrame, out_path: str, sep: str, quote_all: bool, head
         sep=sep,
         quoting=quoting,
         encoding="utf-8",
-        columns=OUTPUT_COLS,
+        columns=(columns or OUTPUT_COLS),
     )

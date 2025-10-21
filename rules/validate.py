@@ -204,4 +204,8 @@ def validate_fields(row: dict, ctx) -> tuple[dict, list[str]]:
     # region по whitelist (если задан)
     row["region"] = _validate_region(row.get("region"), alpha2, ctx, flags)
 
+    # В strict-режиме при плохом формате ZIP — очищаем ZIP
+    if ctx.validate == "strict" and ("bad_zip_format" in flags):
+        row["zip"] = None
+
     return row, flags

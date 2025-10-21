@@ -286,8 +286,24 @@ def run_job(**kwargs):
             for col in OUTPUT_COLS:
                 df.at[idx, col] = row_dict.get(col)
 
-        # WRITE
-        io_utils.write_chunk(df[OUTPUT_COLS].copy(), output_path, ctx.sep, ctx.quote_all, header=not header_written)
+        # WRITE: extras (как есть) → целевые 6 → address (в конце)
+        all_cols = list(df.columns)
+        target_set = set(io_utils.TARGET_COLS)
+        extras = [c for c in all_cols if c not in target_set]
+        out_columns = []
+        out_columns.extend(extras)
+        out_columns.extend(OUTPUT_COLS)
+        out_columns.append("address")
+        # уникализуем, сохраняя порядок и существование в df
+        seen = set()
+        ordered_cols = []
+        for c in out_columns:
+            if c in seen:
+                continue
+            if c in df.columns:
+                ordered_cols.append(c)
+                seen.add(c)
+        io_utils.write_chunk(df[ordered_cols].copy(), output_path, ctx.sep, ctx.quote_all, header=not header_written, columns=ordered_cols)
         header_written = True
 
         ctx.processed_rows += len(df)
