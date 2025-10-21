@@ -1,0 +1,63 @@
+# Базовый профиль нормализации (глобальные правила и алиасы)
+
+# Убираем такие хвосты у стран (в конце строки, регистронезависимо)
+stop_country_suffixes:
+  - ", province of china"
+  - " province of china"
+  - ", the democratic republic of"
+  - " the democratic republic of"
+  - ", the state of"
+  - " the state of"
+  - ", republic"
+  - " republic"
+  - ", federation"
+  - " federation"
+
+# Алиасы стран → каноничное имя (ключи в нижнем регистре)
+country_aliases:
+  "russian federation": "Russia"
+  "viet nam": "Vietnam"
+  "u.s.a.": "United States"
+  "usa": "United States"
+  "u s a": "United States"
+  "us": "United States"
+  "u.k.": "United Kingdom"
+  "uk": "United Kingdom"
+  "uae": "United Arab Emirates"
+  "korea, republic of": "South Korea"
+  "korea, democratic people's republic of": "North Korea"
+  "czechia": "Czech Republic"
+  "tanzania, united republic of": "Tanzania"
+  "bolivia (plurinational state of)": "Bolivia"
+  "syrian arab republic": "Syria"
+  "iran, islamic republic of": "Iran"
+
+# Алиасы регионов/городов/районов (глобальные)
+region_aliases: {}
+locality_aliases: {}
+district_aliases: {}
+
+# По-странам (ISO alpha-2) — для специфических алиасов
+region_aliases_by_country:
+  TH:
+    "krung thep maha nakhon": "Bangkok"
+locality_aliases_by_country:
+  TH:
+    "krung thep": "Bangkok"
+    "กรุงเทพฯ": "Bangkok"
+district_aliases_by_country:
+  TH: {}
+
+# Нормализация суффиксов улиц (латиница; заменяем по словам)
+# пример: "st" → "Street", "rd" → "Road"
+street_suffix_normalization:
+  "st": "Street"
+  "rd": "Road"
+  "ave": "Avenue"
+  "av": "Avenue"
+  "ave.": "Avenue"
+  "blvd": "Boulevard"
+  "hwy": "Highway"
+  "ln": "Lane"
+  "dr": "Drive"
+  "ct": "Court"

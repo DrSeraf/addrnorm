@@ -1,0 +1,41 @@
+
+---
+
+### 📄 **.gitignore**
+```gitignore
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pkl
+*.log
+
+# venv
+venv/
+.env/
+.venv/
+env/
+ENV/
+
+# Output & temp
+/out/
+*.csv
+*.json
+*.txt
+*.zip
+*.gz
+
+# IDE
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker / WSL
+*.pid
+*.sock
