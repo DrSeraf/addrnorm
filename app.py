@@ -62,6 +62,11 @@ with st.sidebar:
     libpostal_url = st.text_input("Libpostal URL (опц.)", value="http://localhost:8080/parser")
     validate = st.selectbox("Валидация", ["off", "loose", "strict"], index=1)
     fuzzy_threshold = st.slider("Порог fuzzy для починок", min_value=70, max_value=100, value=85, step=1)
+    st.divider()
+    st.subheader("Сохранение результатов")
+    save_dir = st.text_input("Директория сохранения", value=r"D:\Desktop")
+    out_name_hint = "<имя входного файла>Done.csv"
+    out_name_input = st.text_input("Имя выходного CSV", value="", placeholder=out_name_hint, help="Оставьте пустым, чтобы использовать <имя входного>Done.csv")
 
 st.subheader("Шаг 1 — Загрузка файлов")
 uploaded_csv = st.file_uploader("Входной CSV", type=["csv"]) 
@@ -85,11 +90,25 @@ if run_clicked and uploaded_csv is not None:
             with open(rules_path, "wb") as f:
                 f.write(uploaded_rules.read())
 
-        out_dir = os.path.join(workdir, "out")
-        os.makedirs(out_dir, exist_ok=True)
-        output_path = os.path.join(out_dir, "normalized.csv")
-        report_path = os.path.join(out_dir, "report.json")
-        samples_dir = out_dir
+        # Определяем директорию сохранения и итоговые имена
+        final_dir = save_dir.strip() or os.path.join(workdir, "out")
+        try:
+            os.makedirs(final_dir, exist_ok=True)
+        except Exception as e:
+            st.warning(f"Не удалось создать директорию {final_dir}: {e}. Будет использована временная директория.")
+            final_dir = os.path.join(workdir, "out")
+            os.makedirs(final_dir, exist_ok=True)
+
+        # Имя выходного CSV: <ввод>Done.csv, если не задано вручную
+        in_stem = os.path.splitext(uploaded_csv.name)[0]
+        out_name = (out_name_input.strip() or f"{in_stem}Done.csv")
+        if not out_name.lower().endswith(".csv"):
+            out_name += ".csv"
+        out_stem = os.path.splitext(out_name)[0]
+
+        output_path = os.path.join(final_dir, out_name)
+        report_path = os.path.join(final_dir, f"{out_stem}.report.json")
+        samples_dir = final_dir
 
         # Запуск пайплайна
         t0 = time.time()
@@ -141,10 +160,18 @@ if run_clicked and uploaded_csv is not None:
             with open(report_path, "rb") as f:
                 st.download_button("Скачать report.json", f.read(), file_name="report.json", mime="application/json")
 
-        # samples
+        # samples: переименуем в тот же stem, что и CSV (если файл создан пайплайном)
         in_basename = os.path.splitext(os.path.basename(input_path))[0]
-        samples_path = os.path.join(samples_dir, f"{in_basename}.samples.txt")
-        if os.path.exists(samples_path):
+        default_samples = os.path.join(samples_dir, f"{in_basename}.samples.txt")
+        desired_samples = os.path.join(samples_dir, f"{out_stem}.samples.txt")
+        samples_path = desired_samples if os.path.exists(desired_samples) else (default_samples if os.path.exists(default_samples) else None)
+        if samples_path and (samples_path != desired_samples):
+            try:
+                shutil.copyfile(samples_path, desired_samples)
+                samples_path = desired_samples
+            except Exception:
+                pass
+        if samples_path and os.path.exists(samples_path):
             with open(samples_path, "r", encoding="utf-8") as f:
                 content = f.read()
             st.subheader("Примеры изменений (samples)")
@@ -155,11 +182,10 @@ if run_clicked and uploaded_csv is not None:
         # Всё в ZIP
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
-            for p in (output_path, report_path, samples_path):
+            for p in (output_path, report_path, (samples_path or "")):
                 if p and os.path.exists(p):
                     z.write(p, arcname=os.path.basename(p))
         st.download_button("Скачать все артефакты (ZIP)", buf.getvalue(), file_name="addrnorm_output.zip", mime="application/zip")
 
-        # Скопировать out в кэш сессии для повторной загрузки (опц.)
-        st.info(f"Результаты сохранены во временной директории: {out_dir}")
-
+        # Информация о сохранении
+        st.info(f"Результаты сохранены в: {final_dir}\nCSV: {os.path.basename(output_path)}\nReport: {os.path.basename(report_path)}")

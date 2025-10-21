@@ -129,6 +129,9 @@ def _normalize_street(street: Optional[str], ctx) -> Optional[str]:
     if _is_empty(street):
         return None
     s = str(street).strip()
+    # Быстрый отсев: если строка состоит только из цифр и знаков → пусто
+    if s and all((ch.isdigit() or not ch.isalnum()) for ch in s):
+        return None
 
     # опциональная зачистка по флагам из профиля/правил (консервативно: по умолчанию выключено)
     flags = ctx.profiles_data or {}
@@ -147,6 +150,15 @@ def _normalize_street(street: Optional[str], ctx) -> Optional[str]:
     s = _SEP_RE.sub(", ", s)
     s = _EDGE_RE.sub("", s)
     s = _WS_RE.sub(" ", s)
+
+    # Если после базовой нормализации в строке нет «слов» длиной ≥ 3 букв,
+    # а только числа/знаки/1–2 буквы с номерами (напр. "8/25", "M.3", "A-12") — очищаем
+    tokens = [t for t in re.split(r"[\s,;./\\-]+", s) if t]
+    has_word3 = any(sum(1 for ch in t if str(ch).isalpha()) >= 3 for t in tokens)
+    has_any_letter = any(str(ch).isalpha() for ch in s)
+    if (not has_word3) and (has_any_letter or tokens):
+        # нет «полноценных» слов — считаем это номером/меткой без названия улицы
+        return None
 
     # приводим общеупотребимые суффиксы (только латиница) из профиля
     suffix_map = ctx.profiles_data.get("street_suffix_normalization", {}) or {}
