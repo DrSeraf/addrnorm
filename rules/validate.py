@@ -23,13 +23,18 @@ from geonamescache import GeonamesCache
 # --------- ленивые кэши GeoNames ---------
 _gc: Optional[GeonamesCache] = None
 _cities_by_country: Optional[Dict[str, Dict[str, dict]]] = None  # alpha2 -> {normalized_name: city_info}
+# Быстрый префиксный индекс по ключам городов: alpha2 -> {prefix2 -> [keys...]}
+_city_prefix_index: Optional[Dict[str, Dict[str, list[str]]]] = None
+# Кэш результатов валидации локалити: (alpha2, key) -> фиксированное имя (или исходное)
+_locality_validate_cache: Dict[tuple[str, str], str] = {}
 
 def _init_caches():
-    global _gc, _cities_by_country
+    global _gc, _cities_by_country, _city_prefix_index
     if _gc is None:
         _gc = GeonamesCache()
     if _cities_by_country is None:
         _cities_by_country = {}
+        _city_prefix_index = {}
         # Собираем карту: alpha2 -> { name_lower: info, ... } для городов
         for gid, info in _gc.get_cities().items():
             cc = info.get("countrycode")  # ISO alpha-2
@@ -37,6 +42,8 @@ def _init_caches():
             if not cc or not name:
                 continue
             key = unidecode(name).strip().lower()
+            if not key:
+                continue
             _cities_by_country.setdefault(cc, {})
             # Берём наиболее населённую запись для этого ключа (если дубликаты)
             prev = _cities_by_country[cc].get(key)
@@ -50,6 +57,15 @@ def _init_caches():
                 p2 = _cities_by_country[cc].get(k2)
                 if (p2 is None) or (info.get("population", 0) > p2.get("population", 0)):
                     _cities_by_country[cc][k2] = info
+        # Построим префиксный индекс (двухбуквенный)
+        for cc, pool in _cities_by_country.items():
+            pref_map: Dict[str, list[str]] = {}
+            for k in pool.keys():
+                if not k:
+                    continue
+                p2 = k[:2]
+                pref_map.setdefault(p2, []).append(k)
+            _city_prefix_index[cc] = pref_map
 
 # --------- helpers ---------
 
@@ -58,7 +74,7 @@ def _norm_key(s: Optional[str]) -> Optional[str]:
         return None
     return unidecode(str(s)).strip().lower() or None
 
-def _fuzzy_candidates(name_key: str, pool: Dict[str, dict], top_k: int) -> List[Tuple[str, int]]:
+def _fuzzy_candidates(name_key: str, pool: Dict[str, dict], top_k: int, alpha2: Optional[str] = None) -> List[Tuple[str, int]]:
     """
     Очень лёгкая эвристика без heavy rapidfuzz (чтобы не тащить зависимость сюда):
     считаем похожесть по префиксу/вхождению и грубой длине. Вернём (candidate, score 0..100).
@@ -66,8 +82,15 @@ def _fuzzy_candidates(name_key: str, pool: Dict[str, dict], top_k: int) -> List[
     """
     if not name_key or not pool:
         return []
+    # Сузим набор кандидатов по двум первым буквам, если есть индекс
+    keys_iterable = None
+    if alpha2 and _city_prefix_index is not None:
+        pref = name_key[:2] if len(name_key) >= 2 else name_key[:1]
+        keys_iterable = (_city_prefix_index.get(alpha2, {}).get(pref) or None)
+    keys_iterable = keys_iterable or pool.keys()
+
     cands: List[Tuple[str,int]] = []
-    for cand in pool.keys():
+    for cand in keys_iterable:
         score = 0
         if cand == name_key:
             score = 100
@@ -118,9 +141,18 @@ def _validate_locality(locality: Optional[str], alpha2: Optional[str], ctx, flag
     if pool and key in pool:
         return locality  # норм
 
+    # кэш на повторяющиеся проверки
+    cache_key = (alpha2 or "", key)
+    cached = _locality_validate_cache.get(cache_key)
+    if cached is not None:
+        # если кэшированный отличается — это была фиксация ранее
+        if cached != locality:
+            flags.append("locality_fuzzy_fixed")
+        return cached
+
     # fuzzy в loose
     if ctx.validate == "loose" and pool:
-        cands = _fuzzy_candidates(key, pool, getattr(ctx, "max_fuzzy_candidates", 3) or 3)
+        cands = _fuzzy_candidates(key, pool, getattr(ctx, "max_fuzzy_candidates", 3) or 3, alpha2)
         if cands:
             cand, score = cands[0]
             if score >= ctx.fuzzy_threshold:
@@ -128,10 +160,12 @@ def _validate_locality(locality: Optional[str], alpha2: Optional[str], ctx, flag
                 fixed = pool[cand]["name"]
                 if fixed != locality:
                     flags.append("locality_fuzzy_fixed")
+                _locality_validate_cache[cache_key] = fixed
                 return fixed
 
     # strict или не нашли
     flags.append("city_not_found")
+    _locality_validate_cache[cache_key] = locality
     return locality
 
 def _validate_region(region: Optional[str], alpha2: Optional[str], ctx, flags: List[str]) -> Optional[str]:

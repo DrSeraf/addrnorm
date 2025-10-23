@@ -34,7 +34,14 @@ _UNIT_RE  = re.compile(r"\b(?:unit|apt|apartment|room|rm|bldg|building|flr|floor
 _NON_ADDRESSY = re.compile(r"^[A-Za-z]{2,}$")
 
 def _is_empty(s: Optional[str]) -> bool:
-    return not s or str(s).strip() == "" or str(s).strip().lower() in {"nan", "null", "none"}
+    if not s:
+        return True
+    val = str(s).strip()
+    if not val:
+        return True
+    if val.lower() in {"nan", "null", "none", "na", "n/a", "n.a.", "n.a", "n a", "-", "—"}:
+        return True
+    return False
 
 def _smart_title(s: str) -> str:
     if not _LATIN_RE.search(s):

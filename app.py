@@ -63,36 +63,138 @@ st.caption("Загрузите CSV, настройте параметры, за�
 
 with st.sidebar:
     st.header("Параметры")
-    enc = st.selectbox("Кодировка входного CSV", ["utf-8", "utf-16", "cp1251", "latin1"], index=0)
-    sep_label = st.selectbox("Разделитель", [",", ";", "\\t", "|"] , index=0)
+    enc = st.selectbox(
+        "Кодировка входного CSV",
+        ["utf-8", "utf-16", "cp1251", "latin1"],
+        index=0,
+        help="Как читать входной CSV. Поменяйте, если видите 'кракозябры' в данных."
+    )
+    sep_label = st.selectbox(
+        "Разделитель",
+        [",", ";", "\\t", "|"],
+        index=0,
+        help="Символ, разделяющий столбцы в CSV. \\t — это таб (TSV)."
+    )
     sep = "\t" if sep_label == "\\t" else sep_label
-    quote_all = st.checkbox("Кавычить все поля в выходном CSV", value=False)
+    quote_all = st.checkbox(
+        "Кавычить все поля в выходном CSV",
+        value=False,
+        help="Заключать каждое поле результата в кавычки. Удобно для импорта в строгие системы, но увеличивает размер файла."
+    )
 
-    profiles_text = st.text_input("Профили (через запятую)", value="base,TH")
-    chunksize = st.number_input("Размер чанка", min_value=1000, max_value=200000, value=10000, step=1000)
-    mode = st.radio("Политика извлечения", ["fill-missing-only", "extract-all-to-fill"], index=0)
-    street_from_address = st.checkbox("Собирать street из address (road + house_number)", value=False)
-    libpostal_url = st.text_input("Libpostal URL (опц.)", value="http://localhost:8080/parser")
-    validate = st.selectbox("Валидация", ["off", "loose", "strict"], index=1)
-    fuzzy_threshold = st.slider("Порог fuzzy для починок", min_value=70, max_value=100, value=85, step=1)
-    estimate_total = st.checkbox("Оценивать прогресс (подсчитать строки заранее)", value=True,
-                                 help="Для очень больших файлов может занять немного времени перед стартом")
+    profiles_text = st.text_input(
+        "Профили (через запятую)",
+        value="base,TH",
+        help="Набор преднастроек для стран/общих правил. Влияет на алиасы городов/регионов, шаблоны ZIP, whitelist регионов и суффиксы улиц. Пример: base,PK."
+    )
+    chunksize = st.number_input(
+        "Размер чанка",
+        min_value=1000,
+        max_value=200000,
+        value=10000,
+        step=1000,
+        help="Сколько строк обрабатывать за один проход. Больше — быстрее, но требуется больше памяти."
+    )
+    mode = st.radio(
+        "Политика извлечения",
+        ["fill-missing-only", "extract-all-to-fill"],
+        index=0,
+        help="fill-missing-only: извлекать из address только недостающие поля. extract-all-to-fill: парсить address и дополнять/переопределять значения."
+    )
+    street_from_address = st.checkbox(
+        "Собирать street из address (road + house_number)",
+        value=False,
+        help="Если из address извлечены road и house_number — собрать их в поле street. Если выключено, street берётся только из одноимённой колонки."
+    )
+    libpostal_url = st.text_input(
+        "Libpostal URL (опц.)",
+        value="http://localhost:8080/parser",
+        help="REST API Libpostal для разметки address. Оставьте пустым, чтобы использовать локальные эвристики (хуже качество, но без внешнего сервиса)."
+    )
+    concurrency = st.number_input(
+        "Параллельные запросы к Libpostal",
+        min_value=1, max_value=64, value=4, step=1,
+        help="Количество одновременных запросов к Libpostal. Увеличьте для ускорения при достаточных ресурсах CPU/WSL2."
+    )
+    libpostal_always = st.checkbox(
+        "Всегда вызывать Libpostal (если address пуст — собрать из полей)",
+        value=True,
+        help="Даже если столбца address нет: составить адрес из street/district/locality/region/zip/country и отправить в Libpostal."
+    )
+    validate = st.selectbox(
+        "Валидация",
+        ["off", "loose", "strict"],
+        index=1,
+        help="off — не валидировать. loose — мягкие автопочинки городов и проверка ZIP по паттернам. strict — без автопочинок, неверные ZIP очищаются."
+    )
+    fuzzy_threshold = st.slider(
+        "Порог fuzzy для починок",
+        min_value=70,
+        max_value=100,
+        value=85,
+        step=1,
+        help="Минимальное сходство (0–100) для автопочинки названий в режиме 'loose'."
+    )
+    estimate_total = st.checkbox(
+        "Оценивать прогресс (подсчитать строки заранее)",
+        value=True,
+        help="Быстрая оценка количества строк для корректного прогресса и ETA. Может немного замедлить старт на больших файлах."
+    )
     st.divider()
     st.subheader("Сохранение результатов")
-    save_dir = st.text_input("Директория сохранения", value=r"D:\Desktop")
+    save_dir = st.text_input(
+        "Директория сохранения",
+        value=r"D:\Desktop",
+        help="Куда сохранять финальный CSV, отчёт (report.json) и примеры (samples)."
+    )
+    temp_dir = st.text_input(
+        "Временная директория (опц.)",
+        value="",
+        help="Куда складывать временные файлы работы (копия входного CSV и пр.). Укажите путь на диске с большим свободным местом (например, D:\\Temp в Windows или /home/<user>/tmp в WSL). Если пусто — используется системный TEMP."
+    )
+    cleanup_temp = st.checkbox(
+        "Удалять временную директорию после завершения",
+        value=True,
+        help="Автоматически удалить рабочую папку после завершения задачи, чтобы не занимать место."
+    )
     out_name_hint = "<имя входного файла>Done.csv"
-    out_name_input = st.text_input("Имя выходного CSV", value="", placeholder=out_name_hint, help="Оставьте пустым, чтобы использовать <имя входного>Done.csv")
+    out_name_input = st.text_input(
+        "Имя выходного CSV",
+        value="",
+        placeholder=out_name_hint,
+        help="Оставьте пустым — будет использовано имя входного файла с суффиксом 'Done'."
+    )
 
 st.subheader("Шаг 1 — Загрузка файлов")
-uploaded_csv = st.file_uploader("Входной CSV", type=["csv"]) 
-uploaded_rules = st.file_uploader("rules.yaml / rules.json (опц.)", type=["yaml","yml","json"]) 
+uploaded_csv = st.file_uploader(
+    "Входной CSV",
+    type=["csv"],
+    help="Исходный файл с адресами. Поддерживаются произвольные колонки: целевые поля street/district/locality/region/country/zip/address будут выделены автоматически."
+)
+uploaded_rules = st.file_uploader(
+    "rules.yaml / rules.json (опц.)",
+    type=["yaml", "yml", "json"],
+    help="Пользовательские правила: ZIP-паттерны (country_zip_regex), синонимы (synonyms), флаги очистки (drop_*). Перекрывают настройки профилей."
+)
 
-run_clicked = st.button("Запустить нормализацию", type="primary", disabled=(uploaded_csv is None))
+run_clicked = st.button(
+    "Запустить нормализацию",
+    type="primary",
+    disabled=(uploaded_csv is None),
+    help="Старт пайплайна с параметрами из боковой панели. Результаты и отчёты появятся ниже."
+)
 
 if run_clicked and uploaded_csv is not None:
     with st.spinner("Обработка… это может занять время на больших файлах"):
         # Временная директория для прогона
-        workdir = tempfile.mkdtemp(prefix="addrnorm_")
+        work_parent = (temp_dir.strip() or None)
+        if work_parent:
+            try:
+                os.makedirs(work_parent, exist_ok=True)
+            except Exception as e:
+                st.warning(f"Не удалось создать временную директорию {work_parent}: {e}. Будет использован системный TEMP.")
+                work_parent = None
+        workdir = tempfile.mkdtemp(prefix="addrnorm_", dir=work_parent)
         input_path = os.path.join(workdir, "input.csv")
         with open(input_path, "wb") as f:
             f.write(uploaded_csv.read())
@@ -169,7 +271,8 @@ if run_clicked and uploaded_csv is not None:
             libpostal_url=(libpostal_url.strip() or None),
             validate=validate,
             fuzzy_threshold=int(fuzzy_threshold),
-            concurrency=1,
+            concurrency=int(concurrency),
+            libpostal_always=bool(libpostal_always),
             quiet=True,
             rules_path=rules_path,
         )
@@ -234,3 +337,10 @@ if run_clicked and uploaded_csv is not None:
 
         # Информация о сохранении
         st.info(f"Результаты сохранены в: {final_dir}\nCSV: {os.path.basename(output_path)}\nReport: {os.path.basename(report_path)}")
+
+        # Очистка временной директории
+        if cleanup_temp:
+            try:
+                shutil.rmtree(workdir, ignore_errors=True)
+            except Exception:
+                pass

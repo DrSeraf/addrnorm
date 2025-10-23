@@ -10,15 +10,35 @@ from __future__ import annotations
 import re
 from typing import Dict, Optional
 import requests
+from requests.adapters import HTTPAdapter
+try:
+    from urllib3.util.retry import Retry  # type: ignore
+except Exception:  # urllib3 may not expose Retry the same way; fallback no-retry
+    Retry = None  # type: ignore
 
 _RE_POSTCODE = re.compile(r"\b[A-Z0-9][A-Z0-9 \-]{2,9}\b", re.IGNORECASE)
 _RE_HOUSENUM = re.compile(r"\b(\d+[A-Za-z\/\-]?)\b")
 _RE_COMMON_SEPS = re.compile(r"[,;/]+")
 
+_session: Optional[requests.Session] = None
+
+
+def _get_session() -> requests.Session:
+    global _session
+    if _session is None:
+        s = requests.Session()
+        adapter = HTTPAdapter(pool_connections=64, pool_maxsize=64, max_retries=(Retry(total=2, backoff_factor=0.1, status_forcelist=(429, 500, 502, 503, 504)) if Retry else 0))
+        s.mount("http://", adapter)
+        s.mount("https://", adapter)
+        _session = s
+    return _session
+
+
 def _parse_via_libpostal(url: str, address: str) -> Dict[str, str]:
     # 1) предпочитаем /parser с {"query": "..."}
     try:
-        r = requests.post(url, json={"query": address}, timeout=5)
+        s = _get_session()
+        r = s.post(url, json={"query": address}, timeout=2)
         if r.status_code == 200:
             data = r.json()
             if isinstance(data, list):
@@ -28,7 +48,7 @@ def _parse_via_libpostal(url: str, address: str) -> Dict[str, str]:
         # если 404/400 — попробуем /parse с {"address": "..."}
         if r.status_code in (400, 404):
             alt = url.replace("/parser", "/parse")
-            r2 = requests.post(alt, json={"address": address}, timeout=5)
+            r2 = s.post(alt, json={"address": address}, timeout=2)
             if r2.status_code == 200:
                 data = r2.json()
                 if isinstance(data, list):

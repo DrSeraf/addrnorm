@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import os, time, re
-from typing import Dict, Any
+from unidecode import unidecode
+from typing import Dict, Any, List, Tuple
+from concurrent.futures import ThreadPoolExecutor
 import pandas as pd
 import pycountry, yaml
 
@@ -222,12 +224,53 @@ def run_job(**kwargs):
             fixed = _repair_misaligned_row({k: row.get(k) for k in ["street","district","locality","region","country","zip","address"]})
             for k, v in fixed.items(): df.at[idx, k] = v
 
-        # EXTRACT
-        if ctx.mode in ("fill-missing-only","extract-all-to-fill") or ctx.street_from_address:
+        # EXTRACT — Libpostal, с параллелизмом и опцией составления address из полей
+        if (ctx.mode in ("fill-missing-only","extract-all-to-fill")) or ctx.street_from_address or getattr(ctx, "libpostal_always", False):
+            # Подготовим очередь адресов для парсинга
+            to_parse: List[Tuple[Any, str]] = []  # (idx, address_string)
+            use_libpostal = bool(ctx.libpostal_url)
             for idx, row in df.iterrows():
-                address = row.get("address")
-                if not address: continue
-                parsed = extract_from_address(address, ctx.mode, ctx.libpostal_url)
+                addr = (row.get("address") or "").strip()
+                if not addr and getattr(ctx, "libpostal_always", False):
+                    parts = [
+                        str(row.get("street") or "").strip(),
+                        str(row.get("district") or "").strip(),
+                        str(row.get("locality") or "").strip(),
+                        str(row.get("region") or "").strip(),
+                        str(row.get("zip") or "").strip(),
+                        str(row.get("country") or "").strip(),
+                    ]
+                    addr = ", ".join([p for p in parts if p])
+                if not addr:
+                    continue
+                to_parse.append((idx, addr))
+
+            def _do_parse(a: str) -> dict:
+                return extract_from_address(a, ctx.mode, ctx.libpostal_url if use_libpostal else None)
+
+            parsed_map: Dict[Any, dict] = {}
+            if to_parse:
+                if int(getattr(ctx, "concurrency", 1) or 1) > 1:
+                    workers = int(getattr(ctx, "concurrency", 1) or 1)
+                    with ThreadPoolExecutor(max_workers=workers) as ex:
+                        results = ex.map(lambda item: (item[0], _do_parse(item[1])), to_parse, chunksize=64)
+                        for idx2, parsed in results:
+                            parsed_map[idx2] = parsed
+                else:
+                    for idx2, addr in to_parse:
+                        parsed_map[idx2] = _do_parse(addr)
+
+            # Применяем parsed к строкам
+            for idx, row in df.iterrows():
+                parsed = parsed_map.get(idx) or {}
+                if not parsed:
+                    continue
+                full_name = None
+                if "fullname" in df.columns:
+                    try:
+                        full_name = str(row.get("fullname") or "").strip()
+                    except Exception:
+                        full_name = None
                 if ctx.street_from_address:
                     if not row.get("street"):
                         ns = _compose_street(row.get("street"), parsed)
@@ -238,12 +281,23 @@ def run_job(**kwargs):
                 else:
                     for target, src in [("street",None),("locality","city"),("district","suburb"),
                                         ("region","state"),("country","country"),("zip","zip")]:
-                        if row.get(target): continue
+                        if ctx.mode == "fill-missing-only" and row.get(target):
+                            continue
                         nv = _compose_street("", parsed) if target=="street" else (parsed.get(src or "") or "")
-                        if nv:
+                        # защита от «подхвата» ФИО как города/региона
+                        if nv and full_name and target in ("locality","region"):
+                            if unidecode(nv).strip().lower() == unidecode(full_name).strip().lower():
+                                nv = ""
+                        if nv and (row.get(target) != nv):
                             df.at[idx, target] = nv
                             loggingx.collect_sample(target,"extracted", None, nv, row_ids[idx], ctx)
                             report_mod.update_report(ctx.report_data, target, "extracted")
+
+                # echo-fix после EXTRACT: если locality == region, очищаем region
+                lk = unidecode(str(df.at[idx, "locality"] or "")).strip().lower()
+                rk = unidecode(str(df.at[idx, "region"] or "")).strip().lower()
+                if lk and rk and lk == rk:
+                    df.at[idx, "region"] = ""
 
         # NORMALIZE
         for idx, row in df.iterrows():

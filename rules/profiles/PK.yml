@@ -1,0 +1,40 @@
+# Pakistan-specific profile (aliases, whitelists)
+
+country_aliases:
+  "pk": "Pakistan"
+
+# Common regional aliases (country-scoped)
+region_aliases_by_country:
+  PK:
+    "kpk": "Khyber Pakhtunkhwa"
+    "khyber-pakhtunkhwa": "Khyber Pakhtunkhwa"
+    "nwfp": "Khyber Pakhtunkhwa"
+    "ict": "Islamabad Capital Territory"
+    "ajk": "Azad Kashmir"
+    "g-b": "Gilgit-Baltistan"
+    "gb": "Gilgit-Baltistan"
+
+# Whitelist of first-level regions for validation
+region_lists_by_country:
+  PK:
+    - Punjab
+    - Sindh
+    - Khyber Pakhtunkhwa
+    - Balochistan
+    - Islamabad Capital Territory
+    - Azad Kashmir
+    - Gilgit-Baltistan
+
+# Useful city abbreviations (country-scoped)
+locality_aliases_by_country:
+  PK:
+    "khi": "Karachi"
+    "lhr": "Lahore"
+    "isb": "Islamabad"
+    "rwp": "Rawalpindi"
+    "fsd": "Faisalabad"
+    "pew": "Peshawar"
+    "mux": "Multan"
+    "hyd": "Hyderabad"
+    "qta": "Quetta"
+

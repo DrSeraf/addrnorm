@@ -5,6 +5,7 @@ country_zip_regex:
   AUSTRALIA: '^\d{4}$'
   UNITED STATES: '^\d{5}(-\d{4})?$'
   UNITED KINGDOM: '^(GIR ?0AA|[A-Z]{1,2}\d[A-Z\d]? ?\d[A-Z]{2})$'
+  PAKISTAN: '^\d{5}$'
 
 synonyms:
   BKK: Bangkok

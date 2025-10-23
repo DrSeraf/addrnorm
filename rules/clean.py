@@ -99,7 +99,13 @@ def clean_value(value: str | None) -> str | None:
     if value is None:
         return None
     s = str(value).strip()
-    if not s or s.lower() in {"nan", "none", "null"}:
+    low = s.lower()
+    # расширенный список пустых значений
+    null_tokens = {
+        "nan", "none", "null", "na", "n/a", "n.a.", "n.a", "n a",
+        "-", "—", "not available", "not applicable", "unknown"
+    }
+    if not s or low in null_tokens:
         return None
     try:
         s = unicodedata.normalize("NFKC", s)
